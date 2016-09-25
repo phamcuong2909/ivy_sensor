@@ -34,7 +34,8 @@ const char* WIFI_PWD = "0988807067";
 ESP8266WebServer server(80);
 
 // Khai báo tần suất cập nhật dữ liệu là 10 phút 1 lần
-const int UPDATE_INTERVAL_SECS = 1 * 60;
+const int UPDATE_INTERVAL = 5000; //1 * 60 * 1000;
+unsigned long lastSentToServer = 0;
 
 // Cấu hình thư viện NTP để lấy giờ hiện tại từ Internet
 WiFiUDP Udp;
@@ -47,8 +48,8 @@ time_t prevDisplay = 0; // when the digital clock was displayed
 
 // Cấu hình cho giao thức MQTT
 const char* clientId = "IvySensor1";
-const char* mqttServer = "192.168.1.110";
 //const char* mqttServer = "broker.hivemq.com";
+const char* mqttServer = "192.168.1.110";
 const int mqttPort = 1883;
 // Username và password để kết nối đến MQTT server nếu có 
 // bật chế độ xác thực trên MQTT server
@@ -79,10 +80,14 @@ char humidityMsg[10]; // độ ẩm (%)
 char brightnessMsg[10]; // ánh sáng (%)
 char motionMsg[5]; // chuyển động (1 hoặc 0)
 float temperature, humidity, brightness;
-boolean motionOn = false;
+boolean lastMotionStatus = false;
 
 // Khởi tạo cảm biến độ ẩm nhiệt độ
 DHT dht(DHTPIN, DHTTYPE, 15);
+
+// Khởi tạo thư viện để kết nối wifi và MQTT server
+WiFiClient wclient;
+PubSubClient client(wclient);
 
 static int16_t PROGMEM icon_sleep_1[] = {
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0861, 0xEF7D, 0xEF7D, 0x0861, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0010 (16) pixels
@@ -255,7 +260,6 @@ void bitmap(int x, int y, int16_t *bitmap, int16_t w, int16_t h) {
 
 void setup(void)
 {
-  // Inicjacja portu szeregowego
   Serial.begin(115200);
 
   // Khởi tạo thư viện cho cảm biến DHT
@@ -268,6 +272,9 @@ void setup(void)
   tft.initR(INITR_BLACKTAB);   // ST7735S chip, black tab
   tft.setRotation(1);
 
+  //WiFi.setPhyMode(WIFI_PHY_MODE_11G); 
+  WiFi.setOutputPower(7);
+
   WiFi.begin(WIFI_SSID, WIFI_PWD);
 
   int counter = 0;
@@ -278,6 +285,12 @@ void setup(void)
 
   Serial.print("IP number assigned by DHCP is ");
   Serial.println(WiFi.localIP());
+
+  // Kết nối tới MQTT server
+  client.setServer(mqttServer, mqttPort);
+  // Đăng ký hàm sẽ xử lý khi có dữ liệu từ MQTT server gửi về
+  client.setCallback(onMQTTMessageReceived);
+  
   Serial.println("Starting UDP");
   Udp.begin(localPort);
   Serial.print("Local port: ");
@@ -291,7 +304,6 @@ void setup(void)
   launchWeb(0);
 }
 
-// Zamiana tekstu na liczbę
 int stringToInt(String string)
 {
   int value = 0;
@@ -306,7 +318,6 @@ int stringToInt(String string)
   return value;
 }
 
-// Zamiana tekstu na liczbę
 uint32_t stringToTime(String string)
 {
   uint32_t pctime = 0;
@@ -321,7 +332,6 @@ uint32_t stringToTime(String string)
   return pctime;
 }
 
-// Dwie cyfry z zerem (cache)
 bool printTwoDigitsByZero(int digits, uint8_t *last)
 {
   if (*last == digits)
@@ -341,7 +351,6 @@ bool printTwoDigitsByZero(int digits, uint8_t *last)
   return true;
 }
 
-// Dwie cyfry bez zera (cache)
 bool printTwoDigitsBySpace(int digits, uint8_t *last)
 {
   if (*last == digits)
@@ -516,10 +525,12 @@ void updateIdleScreen()
    * Display current temperature and humidity
    ******************************************/
    
-  float humidity = dht.readHumidity();
+  humidity = dht.readHumidity();
   dtostrf(humidity, 4, 1, humidityMsg);
-  float temperature = dht.readTemperature();
+  temperature = dht.readTemperature();
   dtostrf(temperature, 4, 1, temperatureMsg);
+  brightness = analogRead(A0)*100/1024;
+  dtostrf(brightness, 4, 1, brightnessMsg);
 
   if (!isnan(temperature) && !isnan(humidity))
   {
@@ -544,9 +555,44 @@ void updateIdleScreen()
 
 void loop() 
 {
+  if (!client.connected()) {
+    if (client.connect(clientId, mqttUsername, mqttPassword)) {
+      Serial.println("MQTT server connected");
+      client.loop();
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+    }
+  } else {
+    client.loop();  
+  }
+
+  boolean currentMotionStatus = digitalRead(PIR_PIN);
+  
+  if (currentMotionStatus != lastMotionStatus) {
+    lastMotionStatus = currentMotionStatus;
+    if (currentMotionStatus) {
+      Serial.println("Motion detected");
+    }
+    client.publish(motionTopic, "1");
+  }
+
   updateIdleScreen();
   server.handleClient();
-  //delay(100);
+  unsigned long currentMillis = millis();
+
+  if (lastSentToServer == 0 || currentMillis - lastSentToServer >= UPDATE_INTERVAL) {
+    // Update sensor information to MQTT server
+    client.publish(humidityTopic, humidityMsg);
+    delay(200);
+    client.publish(tempTopic, temperatureMsg);
+    delay(200);
+    client.publish(brightnessTopic, brightnessMsg);
+    Serial.print("Do sang (%) hien tai: "); Serial.println(brightness);
+
+    // save the last time sent data to server
+    lastSentToServer = currentMillis;
+  }
 }
 
 /*-------- NTP code ----------*/
@@ -630,4 +676,14 @@ void launchWeb(int webtype) {
   // Start the server
   server.begin();
   Serial.println("Server started"); 
+}
+
+void onMQTTMessageReceived(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Nhan duoc du lieu tu MQTT server [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
 }
