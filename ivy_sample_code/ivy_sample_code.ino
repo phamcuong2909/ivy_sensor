@@ -14,13 +14,17 @@
 #include <WiFiUdp.h>
 #include <PubSubClient.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
 
-#define DHTTYPE  DHT21
-#define DHTPIN       D2
-
-// Cấu hình cảm biến chuyển động, input được nối với chân D1
+// Khai báo các chân nối với DHT22, cảm biến chuyển động
+// còi buzzer và nút gạt
+#define DHTTYPE  DHT22
+#define DHTPIN       D3
 #define PIR_PIN D1
+#define BUZZER_PIN D4
+#define BTN_PIN D2
 
+// Khai báo các chân điều khiển LCD
 #define TFTCS       D0
 #define TFTDC       D8
 #define TFTRST      D4
@@ -31,11 +35,76 @@ Adafruit_ST7735   tft = Adafruit_ST7735(TFTCS, TFTDC, TFTRST);
 const char* WIFI_SSID = "Sandiego";
 const char* WIFI_PWD = "0988807067";
 
+// Khai báo web server hỗ trợ cấu hình qua giao diện web
 ESP8266WebServer server(80);
+MDNSResponder mdns;
+// Giao diện web
+const char INDEX_HTML[] =
+"<!DOCTYPE html>"
+"<html lang='en' >"
+"<head>"
+"    <meta name = 'viewport' content = 'width = device-width, initial-scale = 1.0, maximum-scale = 1.0, user-scalable=0'>"
+"    <title>Ivy Sensor Alarm Config</title>"
+"    <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.slim.min.js' integrity='sha256-/SIrNqv8h6QGKDuNoLGA4iret+kyesCkHGzVUUV0shc=' crossorigin='anonymous'></script>"
+"    <!-- Latest compiled and minified CSS -->"
+"    <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css' integrity='sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u' crossorigin='anonymous'>"
+"    <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css' integrity='sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp' crossorigin='anonymous'>"
+"    <link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.43/css/bootstrap-datetimepicker-standalone.min.css' integrity='sha256-+CTjwODD2mYru0lguUnWuJ0c6zYdassaASkIFVtD5mY=' crossorigin='anonymous' />"
+"    <script src='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js' integrity='sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa' crossorigin='anonymous'></script>"
+"    <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.15.1/moment.min.js' integrity='sha256-4PIvl58L9q7iwjT654TQJM+C/acEyoG738iL8B8nhXg=' crossorigin='anonymous'></script>"
+"    <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.43/js/bootstrap-datetimepicker.min.js' integrity='sha256-I8vGZkA2jL0PptxyJBvewDVqNXcgIhcgeqi+GD/aw34=' crossorigin='anonymous'></script>"
+"    <script type='text/javascript'>"
+"        $(function () {"
+"            $('#timePicker').datetimepicker({"
+"                format: 'LT'"
+"            });"
+"        });"
+"    </script>"
+"</head>"
+"<body>"
+"    <div class='container col-xs-4 col-xs-offset-4'>"
+"        <div class='page-header'>"
+"          <h1>Ivy Sensor Alarm Config</h1>"
+"        </div>"
+"        <form>"
+"          <div class='form-group'>"
+"            <label for='tempMin'>Temperature Min</label>"
+"            <input type='text' class='form-control' name='tempMin' id='tempMin'>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label for='tempMax'>Temperature Max</label>"
+"            <input type='text' class='form-control' name='tempMax' id='tempMax'>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label for='humidMin'>Humidity Min</label>"
+"            <input type='text' class='form-control' name='humidMin' id='humidMin'>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label for='humidMax'>Humidity Max</label>"
+"            <input type='text' class='form-control' name='humidMax' id='humidMax'>"
+"          </div>"
+"          <div class='form-group'>"
+"            <div class='input-group date' id='timePicker'>"
+"                <input type='text' class='form-control' name='time' />"
+"                <span class='input-group-addon'>"
+"                    <span class='glyphicon glyphicon-time'></span>"
+"                </span>"
+"            </div>"
+"         </div>"
+"           <div class='checkbox'>"
+"             <label>"
+"               <input type='checkbox' name='repeat' id='repeat'> Repeat"
+"             </label>"
+"           </div>"
+"          <button type='submit' class='btn btn-primary'>Submit</button>"
+"        </form>"
+"    </div>"
+"</body>"
+"</html>";
 
-// Khai báo tần suất cập nhật dữ liệu là 10 phút 1 lần
+// Tần suất cập nhật dữ liệu về MQTT server là 10 phút 1 lần
 const int UPDATE_INTERVAL = 5000; //1 * 60 * 1000;
-unsigned long lastSentToServer = 0;
+unsigned long lastSentToServer = 0; // lưu thời gian lần cuối gửi về server
 
 // Cấu hình thư viện NTP để lấy giờ hiện tại từ Internet
 WiFiUDP Udp;
@@ -47,24 +116,27 @@ const int timeZone = 7;     // GMT của Việt Nam, GMT+7
 time_t prevDisplay = 0; // when the digital clock was displayed
 
 // Cấu hình cho giao thức MQTT
-const char* clientId = "IvySensor1";
+const char* clientId = "IvySensor11";
 //const char* mqttServer = "broker.hivemq.com";
-const char* mqttServer = "192.168.1.110";
-const int mqttPort = 1883;
-// Username và password để kết nối đến MQTT server nếu có 
+//const char* mqttServer = "192.168.1.110";
+const char* mqttServer = "m20.cloudmqtt.com";
+const int mqttPort = 15060;
+// Username và password để kết nối đến MQTT server nếu server có
 // bật chế độ xác thực trên MQTT server
 // Nếu không dùng thì cứ để vậy
-const char* mqttUsername = "<MQTT_BROKER_USERNAME>";
-const char* mqttPassword = "<MQTT_BROKER_PASSWORD>";
+//const char* mqttUsername = "<MQTT_BROKER_USERNAME>";
+//const char* mqttPassword = "<MQTT_BROKER_PASSWORD>";
+const char* mqttUsername = "jbfptrgk";
+const char* mqttPassword = "hRZXXsuJBg4R";
 
 // Tên MQTT topic để gửi thông tin về nhiệt độ
-const char* tempTopic = "/eHome/Bedroom1/Temperature";
+const char* tempTopic = "/easytech.vn/LivingRoom/Temperature";
 // Tên MQTT topic để gửi thông tin về độ ẩm
-const char* humidityTopic = "/eHome/Bedroom1/Humidity";
+const char* humidityTopic = "/easytech.vn/LivingRoom/Humidity";
 // Tên MQTT topic để gửi thông tin về ánh sáng
-const char* brightnessTopic = "/eHome/Bedroom1/Brightness";
+const char* brightnessTopic = "/easytech.vn/LivingRoom/Light";
 // Tên MQTT topic để gửi thông tin về chuyển động khi phát hiện
-const char* motionTopic = "/eHome/Bedroom1/Motion";
+const char* motionTopic = "/easytech.vn/LivingRoom/Motion";
 
 boolean           blinkDot = false;
 boolean           noData = true;
@@ -88,6 +160,8 @@ DHT dht(DHTPIN, DHTTYPE, 15);
 // Khởi tạo thư viện để kết nối wifi và MQTT server
 WiFiClient wclient;
 PubSubClient client(wclient);
+
+// Khai báo các icon để hiển thị trên màn hình LCD
 
 static int16_t PROGMEM icon_sleep_1[] = {
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0861, 0xEF7D, 0xEF7D, 0x0861, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0010 (16) pixels
@@ -151,7 +225,7 @@ static int16_t PROGMEM icon_temperature[] = {
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xFFFF, 0xFFFF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0020 (32) pixels
 0x0000, 0x0000, 0x8C71, 0x9CD3, 0x18E3, 0x0000, 0x2965, 0xBDD7, 0xBDD7, 0x18E3, 0x0000, 0x18E3, 0x9CD3, 0x8C71, 0x0000, 0x0000,   // 0x0030 (48) pixels
 0x0000, 0x0000, 0x9CD3, 0xF7BE, 0xDEDB, 0x0861, 0x5AEB, 0x7BCF, 0x7BCF, 0x5AEB, 0x0861, 0xDEDB, 0xF7BE, 0x9CD3, 0x0000, 0x0000,   // 0x0040 (64) pixels
-0x0000, 0x0000, 0x18E3, 0xD6BA, 0x39E7, 0xD6BA, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xD6BA, 0x39E7, 0xD6BA, 0x18E3, 0x0000, 0x0000,   // 0x0050 (80) pixels
+0x0000, 0x0000, 0x18E3, 0xD6BA, 0x39E7, 0xD6BA, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xBA, 0x39E7, 0xD6BA, 0x18E3, 0x0000, 0x0000,   // 0x0050 (80) pixels
 0x0000, 0x0000, 0x0000, 0x0861, 0xD6BA, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xD6BA, 0x0861, 0x0000, 0x0000, 0x0000,   // 0x0060 (96) pixels
 0x0000, 0x0000, 0x18E3, 0x5ACB, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0x5ACB, 0x2965, 0x0000, 0x0000,   // 0x0070 (112) pixels
 0x8430, 0xEF7D, 0xB596, 0x8430, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0x73AE, 0xB596, 0xEF7D, 0x8430,   // 0x0080 (128) pixels
@@ -165,42 +239,20 @@ static int16_t PROGMEM icon_temperature[] = {
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x7BCF, 0x7BCF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0100 (256) pixels
 };
 
-static int16_t PROGMEM icon_heart_1[] = {
-0x0000, 0x2965, 0xBDF7, 0xFFFF, 0xFFFF, 0xFFFF, 0x9CF3, 0x0861, 0x0861, 0xAD75, 0xFFFF, 0xFFFF, 0xFFFF, 0xBDF7, 0x2965, 0x0000,   // 0x0010 (16) pixels
-0x18E3, 0xEF5D, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xCE79, 0xCE79, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xEF5D, 0x18E3,   // 0x0020 (32) pixels
-0x9CD3, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0x9CD3,   // 0x0030 (48) pixels
-0xE73C, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xE73C,   // 0x0040 (64) pixels
-0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE,   // 0x0050 (80) pixels
-0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E,   // 0x0060 (96) pixels
-0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E, 0xF79E,   // 0x0070 (112) pixels
-0xC618, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xEF7D, 0xC618,   // 0x0080 (128) pixels
-0x5ACB, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0x5ACB,   // 0x0090 (144) pixels
-0x0000, 0xBDF7, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0xBDF7, 0x0000,   // 0x00A0 (160) pixels
-0x0000, 0x2945, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0x2945, 0x0000,   // 0x00B0 (176) pixels
-0x0000, 0x0000, 0x52AA, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0x52AA, 0x0000, 0x0000,   // 0x00C0 (192) pixels
-0x0000, 0x0000, 0x0000, 0x52AA, 0xE71C, 0xE71C, 0xE71C, 0xE71C, 0xE71C, 0xE71C, 0xE71C, 0xE71C, 0x52AA, 0x0000, 0x0000, 0x0000,   // 0x00D0 (208) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x528A, 0xDEFB, 0xDEFB, 0xDEFB, 0xDEFB, 0xDEFB, 0xDEFB, 0x528A, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x00E0 (224) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x528A, 0xCE79, 0xDEFB, 0xDEFB, 0xCE79, 0x528A, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x00F0 (240) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2945, 0xB596, 0xB596, 0x2945, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0100 (256) pixels
-};
-
-static int16_t PROGMEM icon_heart_2[] = {
-0x0000, 0x2965, 0xBDF7, 0xFFFF, 0xFFFF, 0xFFFF, 0x9CF3, 0x0861, 0x0861, 0xAD75, 0xFFFF, 0xFFFF, 0xFFFF, 0xBDF7, 0x2965, 0x0000,   // 0x0010 (16) pixels
-0x18E3, 0xEF5D, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xCE79, 0xCE79, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xEF5D, 0x18E3,   // 0x0020 (32) pixels
-0x9CD3, 0xFFDF, 0xEF5D, 0x5AEB, 0x39E7, 0x6B6D, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0x6B6D, 0x39E7, 0x5AEB, 0xEF5D, 0xFFDF, 0x9CD3,   // 0x0030 (48) pixels
-0xE73C, 0xF7BE, 0x7BCF, 0x0000, 0x0000, 0x0000, 0x6B6D, 0xF7BE, 0xF7BE, 0x6B6D, 0x0000, 0x0000, 0x0000, 0x7BCF, 0xF7BE, 0xE73C,   // 0x0040 (64) pixels
-0xF7BE, 0xF7BE, 0x2965, 0x0000, 0x0000, 0x0000, 0x0000, 0x9CD3, 0x9CD3, 0x0000, 0x0000, 0x0000, 0x0000, 0x39E7, 0xF7BE, 0xF7BE,   // 0x0050 (80) pixels
-0xF79E, 0xF79E, 0x18E3, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x18E3, 0xF79E, 0xF79E,   // 0x0060 (96) pixels
-0xF79E, 0xF79E, 0x4A49, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x4A49, 0xF79E, 0xF79E,   // 0x0070 (112) pixels
-0xC618, 0xEF7D, 0xB596, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xB596, 0xEF7D, 0xC618,   // 0x0080 (128) pixels
-0x5ACB, 0xEF5D, 0xEF5D, 0x4A49, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x39C7, 0xEF5D, 0xEF5D, 0x5ACB,   // 0x0090 (144) pixels
-0x0000, 0xBDF7, 0xEF5D, 0xDEDB, 0x0861, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0861, 0xDEDB, 0xEF5D, 0xBDF7, 0x0000,   // 0x00A0 (160) pixels
-0x0000, 0x2945, 0xE73C, 0xE73C, 0xBDD7, 0x0861, 0x0000, 0x0000, 0x0000, 0x0000, 0x0861, 0xBDD7, 0xE73C, 0xE73C, 0x2945, 0x0000,   // 0x00B0 (176) pixels
-0x0000, 0x0000, 0x52AA, 0xE73C, 0xE73C, 0xBDD7, 0x0861, 0x0000, 0x0000, 0x0861, 0xBDD7, 0xE73C, 0xE73C, 0x52AA, 0x0000, 0x0000,   // 0x00C0 (192) pixels
-0x0000, 0x0000, 0x0000, 0x52AA, 0xE71C, 0xE71C, 0xB5B6, 0x2945, 0x2945, 0xB5B6, 0xE71C, 0xE71C, 0x52AA, 0x0000, 0x0000, 0x0000,   // 0x00D0 (208) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x528A, 0xDEFB, 0xDEFB, 0xD69A, 0xD69A, 0xDEFB, 0xDEFB, 0x528A, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x00E0 (224) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x528A, 0xCE79, 0xDEFB, 0xDEFB, 0xCE79, 0x528A, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x00F0 (240) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2945, 0xB596, 0xB596, 0x2945, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0100 (256) pixels
+static int16_t PROGMEM icon_alarm[] = {
+  0x8410, 0x8410, 0x8410, 0x83ef, 0x83ef, 0x7451, 0x6cb2, 0x6cd3, 0x6cb2, 0x7471, 0x83ef, 0x83ef, 0x8410, 0x8410, 0x8410, 
+  0x8410, 0x8410, 0x83ef, 0x7c10, 0x7451, 0x8b8e, 0xb249, 0xc1a6, 0xb249, 0x8b8e, 0x7451, 0x7c10, 0x83ef, 0x8410, 0x8410, 
+  0x8410, 0x83ef, 0x7c10, 0x7451, 0xb249, 0xf820, 0xf800, 0xf800, 0xf800, 0xf800, 0xb228, 0x7451, 0x7c10, 0x83ef, 0x8410, 
+  0x8410, 0x83ef, 0x7451, 0xaaaa, 0xf800, 0xf800, 0xf924, 0xff7d, 0xfa08, 0xf800, 0xf800, 0xb269, 0x7451, 0x83ef, 0x8410, 
+  0x8410, 0x7c10, 0x7c10, 0xe882, 0xf800, 0xf000, 0xf904, 0xffff, 0xf9e7, 0xf000, 0xf800, 0xf041, 0x83ef, 0x7c10, 0x8410, 
+  0x8410, 0x7c30, 0x934d, 0xf800, 0xf800, 0xf000, 0xf841, 0xfe9a, 0xf904, 0xf000, 0xf820, 0xf800, 0x9b2c, 0x7430, 0x8410, 
+  0x8410, 0x7430, 0x9b2c, 0xf800, 0xf820, 0xf820, 0xf800, 0xfb8e, 0xf861, 0xf800, 0xf820, 0xf800, 0x9b0c, 0x7451, 0x8410, 
+  0x8410, 0x7c10, 0x83cf, 0xf041, 0xf800, 0xf800, 0xf882, 0xfcb2, 0xf8e3, 0xf800, 0xf800, 0xf020, 0x8bae, 0x7c10, 0x8410, 
+  0x8410, 0x83ef, 0x7451, 0xba08, 0xf800, 0xf800, 0xf8e3, 0xfedb, 0xf945, 0xf800, 0xf800, 0xc1c7, 0x7451, 0x7bef, 0x8410, 
+  0x8410, 0x83ef, 0x7c10, 0x7c30, 0xc986, 0xf800, 0xf800, 0xf800, 0xf800, 0xf800, 0xd165, 0x7c30, 0x7c10, 0x83ef, 0x8410, 
+  0x8410, 0x8410, 0x83ef, 0x7c10, 0x7451, 0xa2eb, 0xc986, 0xd904, 0xc965, 0xa2cb, 0x7451, 0x7c10, 0x83ef, 0x8410, 0x8410, 
+  0x8410, 0x8410, 0x8410, 0x83ef, 0x7c10, 0x7451, 0x7451, 0x7451, 0x7451, 0x7451, 0x7c10, 0x83ef, 0x8410, 0x8410, 0x8410, 
+  0x8410, 0x8410, 0x8410, 0x8410, 0x8410, 0x83ef, 0x7c10, 0x7c10, 0x7c10, 0x83ef, 0x8410, 0x8410, 0x8410, 0x8410, 0x8410
 };
 
 static int16_t PROGMEM icon_clock[] = {
@@ -222,25 +274,6 @@ static int16_t PROGMEM icon_clock[] = {
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0100 (256) pixels
 };
 
-static int16_t PROGMEM icon_nodata[] = {
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x630C, 0xFFFF, 0xD69A, 0x0000, 0x0000,   // 0x0010 (16) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x3186, 0xBDF7, 0xEF7D, 0x4A69, 0x5AEB, 0xFFFF, 0xFFFF, 0xFFFF, 0x0000, 0x0000,   // 0x0020 (32) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2965, 0xEF5D, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0x5AEB, 0x0000, 0x0000,   // 0x0030 (48) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2965, 0xEF5D, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0xFFDF, 0x5AEB, 0x0000, 0x0000, 0x0000,   // 0x0040 (64) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2965, 0xEF5D, 0xF7BE, 0xF7BE, 0xF7BE, 0xF7BE, 0x2965, 0x0000, 0x0000, 0x0000,   // 0x0050 (80) pixels
-0x0000, 0x0000, 0x2965, 0x2965, 0x0000, 0x0000, 0x0000, 0x2965, 0xE73C, 0xF7BE, 0xF7BE, 0xF7BE, 0xBDD7, 0x0000, 0x0000, 0x0000,   // 0x0060 (96) pixels
-0x0000, 0x2965, 0xE71C, 0xE71C, 0x2965, 0x0000, 0x0000, 0x0000, 0x2965, 0x94B2, 0x5ACB, 0x39E7, 0x2965, 0x0000, 0x0000, 0x0000,   // 0x0070 (112) pixels
-0x0000, 0xB5B6, 0xEF7D, 0xEF7D, 0xE71C, 0x2965, 0x0000, 0x0000, 0x18E3, 0xA534, 0xEF7D, 0xEF7D, 0xEF7D, 0xA534, 0x18E3, 0x0000,   // 0x0080 (128) pixels
-0x0000, 0xDEFB, 0xEF7D, 0xEF7D, 0xEF7D, 0xDEFB, 0x2965, 0x18E3, 0xDEFB, 0xDEFB, 0x8430, 0x39C7, 0x6B4D, 0xEF7D, 0xDEFB, 0x18E3,   // 0x0090 (144) pixels
-0x0000, 0x2965, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0x9492, 0xA514, 0xDEFB, 0x0000, 0x0000, 0x0861, 0xC618, 0xEF5D, 0xEF5D, 0xA514,   // 0x00A0 (160) pixels
-0x0000, 0x5ACB, 0xEF5D, 0xEF5D, 0xEF5D, 0xEF5D, 0x39C7, 0xEF5D, 0x8430, 0x0000, 0x0861, 0xBDF7, 0xEF5D, 0xBDF7, 0x5ACB, 0xEF5D,   // 0x00B0 (176) pixels
-0x52AA, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0xE73C, 0x39C7, 0xE73C, 0x39C7, 0x0861, 0xBDF7, 0xE73C, 0xBDF7, 0x0861, 0x0000, 0xE73C,   // 0x00C0 (192) pixels
-0xE73C, 0xE73C, 0xE73C, 0x52AA, 0x2945, 0xAD75, 0x2945, 0xE73C, 0x632C, 0xBDD7, 0xE73C, 0xBDD7, 0x0861, 0x0000, 0x4A49, 0xE73C,   // 0x00D0 (208) pixels
-0xBDD7, 0xE71C, 0x52AA, 0x0000, 0x0000, 0x0000, 0x0000, 0x9CF3, 0xE71C, 0xE71C, 0xBDD7, 0x0861, 0x0000, 0x0000, 0xBDD7, 0x9CF3,   // 0x00E0 (224) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x18E3, 0xD69A, 0xE71C, 0x630C, 0x39C7, 0x7BEF, 0xD69A, 0xD69A, 0x18E3,   // 0x00F0 (240) pixels
-0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x18E3, 0x9CD3, 0xDEFB, 0xDEFB, 0xDEFB, 0x9CD3, 0x18E3, 0x0000,   // 0x0100 (256) pixels
-};
-
 void bitmap(int x, int y, int16_t *bitmap, int16_t w, int16_t h) {
 
   int16_t col, row;
@@ -253,8 +286,6 @@ void bitmap(int x, int y, int16_t *bitmap, int16_t w, int16_t h) {
         tft.pushColor(pgm_read_word(bitmap+offset));
         offset++;
       }
-
-
     }
 }
 
@@ -262,35 +293,59 @@ void setup(void)
 {
   Serial.begin(115200);
 
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+  pinMode(PIR_PIN, INPUT);
+  pinMode(BTN_PIN, INPUT);
+
   // Khởi tạo thư viện cho cảm biến DHT
   Wire.begin();
   dht.begin();
 
-
-  // Init thư viện cho màn hình TFT
+  // Khởi tạo thư viện điều khiển màn hình LCD
   //tft.initR(INITR_REDTAB);
   tft.initR(INITR_BLACKTAB);   // ST7735S chip, black tab
   tft.setRotation(1);
+  clearScreen();
+  tft.setTextSize(1);
+  tft.setTextColor(ST7735_YELLOW, ST7735_BLACK);
+  tft.setCursor(10, 50);
+  
+  tft.print("Dang ket noi Wifi");
 
+  // Do cảm biến chuyển động PIR bị nhiễu khi sử dụng gần Esp8266 nên ta cần
+  // phải giảm mức tín hiệu của esp8266 để tránh nhiễu cho PIR
   //WiFi.setPhyMode(WIFI_PHY_MODE_11G); 
   WiFi.setOutputPower(7);
 
+  // Kết nối Wifi và chờ đến khi kết nối thành công
   WiFi.begin(WIFI_SSID, WIFI_PWD);
 
-  int counter = 0;
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(300);
     Serial.print(".");
+    tft.print('.');
   }
 
   Serial.print("IP number assigned by DHCP is ");
   Serial.println(WiFi.localIP());
 
+  tft.print("done!");
+  tft.setCursor(10, 80);
+  tft.print("IP: ");
+  
+  tft.print(WiFi.localIP());
+  delay(1000);
+
   // Kết nối tới MQTT server
   client.setServer(mqttServer, mqttPort);
   // Đăng ký hàm sẽ xử lý khi có dữ liệu từ MQTT server gửi về
   client.setCallback(onMQTTMessageReceived);
-  
+
+  clearScreen();
+  tft.setCursor(10, 50);  
+  tft.print("Dang cap nhat gio tu Internet...");
+ 
   Serial.println("Starting UDP");
   Udp.begin(localPort);
   Serial.print("Local port: ");
@@ -299,13 +354,15 @@ void setup(void)
   setSyncProvider(getNtpTime);
   setSyncInterval(300);
 
+  tft.print("done!");
+  delay(1000);
+
   drawIdleScreen();
 
   launchWeb(0);
 }
 
-int stringToInt(String string)
-{
+int stringToInt(String string) {
   int value = 0;
   for (int i=0; i < string.length() ; i++)
   {
@@ -318,22 +375,18 @@ int stringToInt(String string)
   return value;
 }
 
-uint32_t stringToTime(String string)
-{
+uint32_t stringToTime(String string) {
   uint32_t pctime = 0;
-  for (int i=0; i < string.length() ; i++)
-  {
+  for (int i=0; i < string.length() ; i++) {
     char c = string[i];
-    if (c >= '0' && c <= '9')
-    { 
+    if (c >= '0' && c <= '9') { 
       pctime = (10 * pctime) + (c - '0');
     }
   }
   return pctime;
 }
 
-bool printTwoDigitsByZero(int digits, uint8_t *last)
-{
+bool printTwoDigitsByZero(int digits, uint8_t *last) {
   if (*last == digits)
   {
     return false;
@@ -351,8 +404,7 @@ bool printTwoDigitsByZero(int digits, uint8_t *last)
   return true;
 }
 
-bool printTwoDigitsBySpace(int digits, uint8_t *last)
-{
+bool printTwoDigitsBySpace(int digits, uint8_t *last) {
   if (*last == digits)
   {
     return false;
@@ -370,9 +422,7 @@ bool printTwoDigitsBySpace(int digits, uint8_t *last)
   return true;
 }
 
-// Cztery cyfry bez zera (cache)
-bool printFourDigitsByZero(int digits, uint16_t *last)
-{
+bool printFourDigitsByZero(int digits, uint16_t *last) {
   if (*last == digits)
   {
     return false;
@@ -398,8 +448,7 @@ bool printFourDigitsByZero(int digits, uint16_t *last)
   return true;
 }
 
-void clearScreen()
-{
+void clearScreen() {
   tft.fillScreen(ST7735_BLACK);
   tft.setTextColor(ST7735_WHITE, ST7735_BLACK);
 
@@ -409,18 +458,15 @@ void clearScreen()
   lastTemperature = 255;
 }
 
-void drawIdleScreen()
-{
+void drawIdleScreen() {
   clearScreen();
 
   bitmap(19, 87, icon_humidity, 16, 16);
   bitmap(18, 107, icon_temperature, 16, 16);
 }
 
-void updateSecDot(unsigned long drawTime, int fontsize, int x, int y, uint16_t color)
-{
-  if (drawTime < 1000)
-  {
+void updateSecDot(unsigned long drawTime, int fontsize, int x, int y, uint16_t color) {
+  if (drawTime < 1000) {
     unsigned long diffTime = 1000 - drawTime;
     delay(diffTime);
   }
@@ -429,42 +475,27 @@ void updateSecDot(unsigned long drawTime, int fontsize, int x, int y, uint16_t c
   tft.setCursor(x, y);
   tft.setTextColor(color, ST7735_BLACK);
 
-  if (blinkDot)
-  {
+  if (blinkDot) {
      tft.print(':');
-  } else
-  {
+  } else {
     tft.print(' ');
   }
 
   tft.setTextSize(1);
   tft.setCursor(0, 120);
 
-  if (noData)
-  {
-    if (blinkDot)
-    {
-      bitmap(115, 95, icon_nodata, 16, 16);
-    } else
-    {
-      tft.fillRect(115, 95, 16, 16, ST7735_BLACK);
-    }
-  } else
-  {
-    if (blinkDot)
-    {
-      bitmap(115, 95, icon_heart_1, 16, 16);
-    } else
-    {
-      bitmap(115, 95, icon_heart_2, 16, 16);
-    }
+  /*
+  if (blinkDot) {
+    bitmap(115, 95, icon_alarm, 16, 16);
+  } else {
+    tft.fillRect(115, 95, 16, 16, ST7735_BLACK);
   }
+  */
 
   blinkDot = !blinkDot;
 }
 
-void updateIdleScreen()
-{
+void updateIdleScreen() {
   unsigned long startDrawTime = millis();
 
   /*********************************
@@ -527,8 +558,10 @@ void updateIdleScreen()
    
   humidity = dht.readHumidity();
   dtostrf(humidity, 4, 1, humidityMsg);
+  Serial.println(humidityMsg);
   temperature = dht.readTemperature();
   dtostrf(temperature, 4, 1, temperatureMsg);
+  Serial.println(temperatureMsg);
   brightness = analogRead(A0)*100/1024;
   dtostrf(brightness, 4, 1, brightnessMsg);
 
@@ -553,8 +586,14 @@ void updateIdleScreen()
   updateSecDot(millis() - (startDrawTime), 4, 68, 5, ST7735_CYAN);
 }
 
-void loop() 
-{
+void loop() {
+  digitalWrite(BUZZER_PIN, HIGH); delay(300);
+  digitalWrite(BUZZER_PIN, LOW); delay(300);
+  digitalWrite(BUZZER_PIN, HIGH); delay(300);
+  digitalWrite(BUZZER_PIN, LOW); delay(300);
+  delay(1000);
+  //return;
+  
   if (!client.connected()) {
     if (client.connect(clientId, mqttUsername, mqttPassword)) {
       Serial.println("MQTT server connected");
@@ -593,6 +632,18 @@ void loop()
     // save the last time sent data to server
     lastSentToServer = currentMillis;
   }
+
+  Serial.println(digitalRead(BTN_PIN));
+}
+
+void onMQTTMessageReceived(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Nhan duoc du lieu tu MQTT server [");
+  Serial.print(topic);
+  Serial.print("] ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
 }
 
 /*-------- NTP code ----------*/
@@ -600,8 +651,7 @@ void loop()
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
 byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
 
-time_t getNtpTime()
-{
+time_t getNtpTime() {
   IPAddress ntpServerIP; // NTP server's ip address
 
   while (Udp.parsePacket() > 0) ; // discard any previously received packets
@@ -632,8 +682,7 @@ time_t getNtpTime()
 }
 
 // send an NTP request to the time server at the given address
-void sendNTPpacket(IPAddress &address)
-{
+void sendNTPpacket(IPAddress &address) {
   // set all bytes in the buffer to 0
   memset(packetBuffer, 0, NTP_PACKET_SIZE);
   // Initialize values needed to form NTP request
@@ -657,6 +706,16 @@ void sendNTPpacket(IPAddress &address)
 /*---------------------- Web server setup ----------------------*/
 
 void launchWeb(int webtype) {
+  if (mdns.begin("ivysensor1", WiFi.localIP())) {
+    Serial.println("MDNS responder started");
+  }
+
+  server.on("/", handleRoot);
+  server.on("/ledon", handleLEDon);
+  server.on("/ledoff", handleLEDoff);
+  server.onNotFound(handleNotFound);
+
+  /*
   if (webtype == 0) {
     server.on("/", []() {
       IPAddress ip = WiFi.localIP();
@@ -673,17 +732,109 @@ void launchWeb(int webtype) {
       //EEPROM.commit();
     });
   }
-  // Start the server
+  */
   server.begin();
   Serial.println("Server started"); 
+  Serial.print("Connect to http://ivysensor1.local or http://");
+  Serial.println(WiFi.localIP());
 }
 
-void onMQTTMessageReceived(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Nhan duoc du lieu tu MQTT server [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
+void handleRoot()
+{
+  if (server.hasArg("tempMin")) {
+    handleSubmit();
   }
-  Serial.println();
+  else {
+    server.send(200, "text/html", INDEX_HTML);
+  }
 }
+
+void returnFail(String msg)
+{
+  server.sendHeader("Connection", "close");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(500, "text/plain", msg + "\r\n");
+}
+
+void handleSubmit()
+{
+  String temp;
+
+  if (!server.hasArg("tempMin")) return returnFail("BAD ARGS");
+  Serial.print("Temp Min: "); Serial.println(server.arg("tempMin"));
+  Serial.print("Temp Max: "); Serial.println(server.arg("tempMax"));
+  Serial.print("Humidity Min: "); Serial.println(server.arg("humidMin"));
+  Serial.print("Humidity Max: "); Serial.println(server.arg("humidMax"));
+  Serial.print("Time: "); Serial.println(server.arg("time"));
+  Serial.print("Repeat: "); Serial.println(server.arg("repeat"));
+  //char buffer[2000];
+  //sprintf(buffer, INDEX_HTML, "checked", "");
+  //server.send(200, "text/html", buffer);
+  //server.send(200, "text/html", INDEX_HTML);
+  server.send(200, "text/html", INDEX_HTML);
+  return;
+  /*
+  LEDvalue = server.arg("LED");
+  if (LEDvalue == "1") {
+    Serial.println("Led on");
+    char buffer[700];
+    sprintf(buffer, INDEX_HTML, "checked", "");
+    server.send(200, "text/html", buffer);
+  }
+  else if (LEDvalue == "0") {
+    Serial.println("Led off");
+    char buffer[700];
+    sprintf(buffer, INDEX_HTML, "", "checked");
+    server.send(200, "text/html", buffer);
+  }
+  else {
+    returnFail("Bad LED value");
+  }
+  */
+}
+
+void returnOK()
+{
+  server.sendHeader("Connection", "close");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "text/plain", "OK\r\n");
+}
+
+/*
+ * Imperative to turn the LED on using a non-browser http client.
+ * For example, using wget.
+ * $ wget http://esp8266webform/ledon
+ */
+void handleLEDon()
+{
+  Serial.println("Led on");
+  returnOK();
+}
+
+/*
+ * Imperative to turn the LED off using a non-browser http client.
+ * For example, using wget.
+ * $ wget http://esp8266webform/ledoff
+ */
+void handleLEDoff()
+{
+  Serial.println("Led off");
+  returnOK();
+}
+
+void handleNotFound()
+{
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET)?"GET":"POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i=0; i<server.args(); i++){
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+}
+
