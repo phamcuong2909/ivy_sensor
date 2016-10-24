@@ -7291,7 +7291,7 @@ MMBT4403 - 40V 600mA SOT-23 (TRANS-09245)</description>
 <part name="C1" library="SparkFun-Capacitors" deviceset="CAP_POL" device="PTH2" value="47uF"/>
 <part name="C2" library="SparkFun-Capacitors" deviceset="CAP_POL" device="PTH2" value="102pF"/>
 <part name="GND5" library="SparkFun" deviceset="GND" device=""/>
-<part name="R1" library="resistor" deviceset="R-US_" device="R0805" value="10K"/>
+<part name="R1" library="resistor" deviceset="R-US_" device="R0805" value="47K"/>
 <part name="Q2" library="SparkFun-DiscreteSemi" deviceset="TRANSISTOR_PNP" device="SMD" value="A1015"/>
 <part name="JP1" library="SparkFun-Connectors" deviceset="M08" device=""/>
 <part name="JP2" library="SparkFun-Connectors" deviceset="M08" device=""/>
@@ -7303,8 +7303,8 @@ MMBT4403 - 40V 600mA SOT-23 (TRANS-09245)</description>
 <wire x1="304.8" y1="91.44" x2="304.8" y2="40.64" width="0.1524" layer="97"/>
 <wire x1="304.8" y1="40.64" x2="137.16" y2="40.64" width="0.1524" layer="97"/>
 <wire x1="137.16" y1="40.64" x2="137.16" y2="91.44" width="0.1524" layer="97"/>
-<text x="238.76" y="81.28" size="3.81" layer="97" font="vector" ratio="15">Ivy Home Sensor V0.4</text>
-<text x="238.76" y="71.12" size="2.54" layer="97" font="vector" ratio="15">2016-10-16
+<text x="238.76" y="81.28" size="3.81" layer="97" font="vector" ratio="15">Ivy Home Sensor V0.5</text>
+<text x="238.76" y="71.12" size="2.54" layer="97" font="vector" ratio="15">2016-10-24
 http://easytech.vn</text>
 <wire x1="137.16" y1="38.1" x2="304.8" y2="38.1" width="0.1524" layer="97"/>
 <wire x1="304.8" y1="38.1" x2="304.8" y2="2.54" width="0.1524" layer="97"/>
