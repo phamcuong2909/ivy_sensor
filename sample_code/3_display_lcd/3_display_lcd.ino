@@ -1,110 +1,40 @@
-/*
-    Used library:
-    NTP: https://github.com/PaulStoffregen/Time
-*/
-
 #include <ESP8266WiFi.h>
 #include <string.h>
-#include <SPI.h>
 #include <Wire.h>
-#include <Adafruit_GFX.h> 
-#include <Adafruit_ST7735.h>
 #include <DHT.h>
 #include <TimeLib.h>
 #include <WiFiUdp.h>
-#include <PubSubClient.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
+#include <Adafruit_GFX.h> 
+#include <Adafruit_ST7735.h>
 
-// Khai báo các chân nối với DHT22, cảm biến chuyển động
-// còi buzzer và nút gạt
+
+// Khai báo các chân nối với cảm biến
 #define DHTTYPE  DHT22
-#define DHTPIN       D3
+#define DHTPIN   D3
 #define PIR_PIN D1
-#define BUZZER_PIN D4
-#define BTN_PIN D2
 
 // Khai báo các chân điều khiển LCD SPI
 #define TFTCS       D0
 #define TFTDC       D8
 #define TFTRST      D4
 
-Adafruit_ST7735   tft = Adafruit_ST7735(TFTCS, TFTDC, TFTRST);
+const int UPDATE_INTERVAL = 5000; // Tần suất cập nhật dữ liệu
+unsigned long lastSensorUpdateTime = 0; // Lưu thời gian lần cuối cùng cập nhật dữ liệu sensor
+
+float temperature, humidity, brightness;
+char temperatureMsg[10]; // nhiệt độ
+char humidityMsg[10]; // độ ẩm (%)
+char brightnessMsg[10]; // ánh sáng (%)
+char motionMsg[5]; // chuyển động (1 hoặc 0)
+
+boolean lastMotionStatus = false;
+
+// Khởi tạo cảm biến độ ẩm nhiệt độ
+DHT dht(DHTPIN, DHTTYPE, 15);
 
 // Cấu hình Wifi, sửa lại theo đúng mạng Wifi của bạn
-const char* WIFI_SSID = "your_wifi";
-const char* WIFI_PWD = "your_wifi_password";
-
-// Khai báo web server hỗ trợ cấu hình qua giao diện web
-ESP8266WebServer server(80);
-MDNSResponder mdns;
-// Giao diện web
-const char INDEX_HTML[] =
-"<!DOCTYPE html>"
-"<html lang='en' >"
-"<head>"
-"    <meta name = 'viewport' content = 'width = device-width, initial-scale = 1.0, maximum-scale = 1.0, user-scalable=0'>"
-"    <title>Ivy Sensor Alarm Config</title>"
-"    <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.slim.min.js' integrity='sha256-/SIrNqv8h6QGKDuNoLGA4iret+kyesCkHGzVUUV0shc=' crossorigin='anonymous'></script>"
-"    <!-- Latest compiled and minified CSS -->"
-"    <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css' integrity='sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u' crossorigin='anonymous'>"
-"    <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css' integrity='sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp' crossorigin='anonymous'>"
-"    <link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.43/css/bootstrap-datetimepicker-standalone.min.css' integrity='sha256-+CTjwODD2mYru0lguUnWuJ0c6zYdassaASkIFVtD5mY=' crossorigin='anonymous' />"
-"    <script src='https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js' integrity='sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa' crossorigin='anonymous'></script>"
-"    <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.15.1/moment.min.js' integrity='sha256-4PIvl58L9q7iwjT654TQJM+C/acEyoG738iL8B8nhXg=' crossorigin='anonymous'></script>"
-"    <script type='text/javascript' src='https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datetimepicker/4.17.43/js/bootstrap-datetimepicker.min.js' integrity='sha256-I8vGZkA2jL0PptxyJBvewDVqNXcgIhcgeqi+GD/aw34=' crossorigin='anonymous'></script>"
-"    <script type='text/javascript'>"
-"        $(function () {"
-"            $('#timePicker').datetimepicker({"
-"                format: 'LT'"
-"            });"
-"        });"
-"    </script>"
-"</head>"
-"<body>"
-"    <div class='container col-xs-4 col-xs-offset-4'>"
-"        <div class='page-header'>"
-"          <h1>Ivy Sensor Alarm Config</h1>"
-"        </div>"
-"        <form method='post'>"
-"          <div class='form-group'>"
-"            <label for='tempMin'>Temperature Min</label>"
-"            <input type='text' class='form-control' name='tempMin' id='tempMin'>"
-"          </div>"
-"          <div class='form-group'>"
-"            <label for='tempMax'>Temperature Max</label>"
-"            <input type='text' class='form-control' name='tempMax' id='tempMax'>"
-"          </div>"
-"          <div class='form-group'>"
-"            <label for='humidMin'>Humidity Min</label>"
-"            <input type='text' class='form-control' name='humidMin' id='humidMin'>"
-"          </div>"
-"          <div class='form-group'>"
-"            <label for='humidMax'>Humidity Max</label>"
-"            <input type='text' class='form-control' name='humidMax' id='humidMax'>"
-"          </div>"
-"          <div class='form-group'>"
-"            <div class='input-group date' id='timePicker'>"
-"                <input type='text' class='form-control' name='time' />"
-"                <span class='input-group-addon'>"
-"                    <span class='glyphicon glyphicon-time'></span>"
-"                </span>"
-"            </div>"
-"         </div>"
-"           <div class='checkbox'>"
-"             <label>"
-"               <input type='checkbox' name='repeat' id='repeat'> Repeat"
-"             </label>"
-"           </div>"
-"          <button type='submit' class='btn btn-primary'>Submit</button>"
-"        </form>"
-"    </div>"
-"</body>"
-"</html>";
-
-// Tần suất cập nhật dữ liệu về MQTT server là 5 phút 1 lần
-const int UPDATE_INTERVAL = 5 * 60 * 1000;
-unsigned long lastSentToServer = 0; // lưu thời gian lần cuối gửi về server
+const char* WIFI_SSID = "Sandiego";
+const char* WIFI_PWD = "0988807067";
 
 // Cấu hình thư viện NTP để lấy giờ hiện tại từ Internet
 WiFiUDP Udp;
@@ -113,52 +43,12 @@ time_t getNtpTime();
 void sendNTPpacket(IPAddress &address);
 static const char ntpServerName[] = "us.pool.ntp.org";
 const int timeZone = 7; // GMT của Việt Nam, GMT+7
-time_t prevDisplay = 0; // Lưu lần cuối cập nhật đồng hồ
+time_t lastClockUpdateTime = 0; // Lưu thời gian lần cuối cập nhật đồng hồ
 
-// Cấu hình cho giao thức MQTT
-const char* clientId = "IvySensor1";
-const char* mqttServer = "broker.hivemq.com";
-const int mqttPort = 1883;
-// Username và password để kết nối đến MQTT server nếu server có
-// bật chế độ xác thực trên MQTT server
-// Nếu không dùng thì cứ để vậy
-const char* mqttUsername = "<MQTT_BROKER_USERNAME>";
-const char* mqttPassword = "<MQTT_BROKER_PASSWORD>";
-
-// MQTT topic để gửi thông tin về nhiệt độ
-const char* tempTopic = "/easytech.vn/LivingRoom/Temperature";
-// MQTT topic để gửi thông tin về độ ẩm
-const char* humidityTopic = "/easytech.vn/LivingRoom/Humidity";
-// MQTT topic để gửi thông tin về ánh sáng
-const char* lightStatusTopic = "/easytech.vn/LivingRoom/Light";
-// MQTT topic để gửi thông tin về chuyển động khi phát hiện
-const char* motionTopic = "/easytech.vn/LivingRoom/Motion";
-
-boolean           blinkDot = false;
-uint8_t           lastHour = 255;
-uint8_t           lastMinute = 255;
-uint8_t           lastHumidity = 255;
-uint8_t           lastTemperature = 255;
-
-// Các chuỗi lưu dữ liệu thu thập được để hiển thị trên màn hình LCD
-// và gửi về server qua giao thức MQTT
-char temperatureMsg[10]; // nhiệt độ
-char humidityMsg[10]; // độ ẩm (%)
-char lightStatusMsg[10]; // ánh sáng (%)
-char motionMsg[5]; // chuyển động (1 hoặc 0)
-float temperature, humidity, lightStatus;
-float minTemperature=0, maxTemperature=0, minHumidity=0, maxHumidity=0;
-boolean lastMotionStatus = false;
-
-// Khởi tạo cảm biến độ ẩm nhiệt độ
-DHT dht(DHTPIN, DHTTYPE, 15);
-
-// Khởi tạo thư viện để kết nối wifi và MQTT server
-WiFiClient wclient;
-PubSubClient client(wclient);
+// Khai báo thiết lập màn hình LCD
+Adafruit_ST7735 tft = Adafruit_ST7735(TFTCS, TFTDC, TFTRST);
 
 // Khai báo các icon để hiển thị trên màn hình LCD
-
 static int16_t PROGMEM icon_humidity[] = {
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2965, 0xDEFB, 0x2965, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0010 (16) pixels
 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x2965, 0xEF5D, 0xFFDF, 0xEF5D, 0x2965, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,   // 0x0020 (32) pixels
@@ -270,18 +160,20 @@ void setup(void)
 {
   Serial.begin(115200);
 
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, HIGH);
-  pinMode(PIR_PIN, INPUT);
-  pinMode(BTN_PIN, INPUT_PULLUP);
-
   // Khởi tạo thư viện cho cảm biến DHT
   Wire.begin();
   dht.begin();
 
+  // Set chế độ của chân nối với cảm biến chuyển động là Input
+  pinMode(PIR_PIN, INPUT);
+
+  // Do cảm biến chuyển động PIR bị nhiễu khi sử dụng gần Esp8266 nên ta cần
+  // phải giảm mức tín hiệu của esp8266 để tránh nhiễu cho PIR
+  //WiFi.setPhyMode(WIFI_PHY_MODE_11G); 
+  WiFi.setOutputPower(7);
+
   // Khởi tạo thư viện điều khiển màn hình LCD
-  //tft.initR(INITR_REDTAB);
-  tft.initR(INITR_BLACKTAB);   // ST7735S chip, black tab
+  tft.initR(INITR_BLACKTAB);
   tft.setRotation(1);
   clearScreen();
   tft.setTextSize(1);
@@ -290,135 +182,158 @@ void setup(void)
   
   tft.print("Dang ket noi Wifi");
 
-  // Do cảm biến chuyển động PIR bị nhiễu khi sử dụng gần Esp8266 nên ta cần
-  // phải giảm mức tín hiệu của esp8266 để tránh nhiễu cho PIR
-  //WiFi.setPhyMode(WIFI_PHY_MODE_11G); 
-  WiFi.setOutputPower(7);
-
   // Kết nối Wifi và chờ đến khi kết nối thành công
   WiFi.begin(WIFI_SSID, WIFI_PWD);
 
+  int count = 0;
   while (WiFi.status() != WL_CONNECTED) {
     delay(300);
     Serial.print(".");
     tft.print('.');
-  }
+    count++;
 
-  Serial.print("IP number assigned by DHCP is ");
-  Serial.println(WiFi.localIP());
+    if (count > 20) {
+      ESP.restart();
+    }
+  }
 
   tft.print("done!");
   tft.setCursor(10, 80);
   tft.print("IP: ");
   
   tft.print(WiFi.localIP());
-
-  digitalWrite(BUZZER_PIN, LOW);
   delay(1000);
-
-  // Kết nối tới MQTT server
-  client.setServer(mqttServer, mqttPort);
-  // Đăng ký hàm sẽ xử lý khi có dữ liệu từ MQTT server gửi về
-  client.setCallback(onMQTTMessageReceived);
 
   clearScreen();
   tft.setCursor(10, 50);  
   tft.print("Dang cap nhat gio tu Internet...");
- 
-  Serial.println("Starting UDP");
+
+  // Kết nối tới NTP server dùng UDP để cập nhật thời gian
+  Serial.print("Dang cap nhat gio tu Internet...");
   Udp.begin(localPort);
-  Serial.print("Local port: ");
-  Serial.println(Udp.localPort());
-  Serial.println("waiting for sync");
   setSyncProvider(getNtpTime);
   setSyncInterval(300);
+  Serial.println("Done");
 
-  tft.print("done!");
-  delay(1000);
+  tft.print("Done!");
 
-  drawIdleScreen();
-
-  
-
-  launchWeb(0);
-
-  digitalWrite(BUZZER_PIN, LOW);
-  delay(500);
-  digitalWrite(BUZZER_PIN, HIGH);
+  clearScreen();
+  bitmap(19, 87, icon_humidity, 16, 16);
+  bitmap(18, 107, icon_temperature, 16, 16);
 }
 
 
-void loop() {  
-  if (!client.connected()) {
-    if (client.connect(clientId, mqttUsername, mqttPassword)) {
-      Serial.println("MQTT server connected");
-      client.loop();
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
+void loop() {
+  updateSensorData();
+  updateTime();
+}
+
+void updateSensorData() {
+  // Đối với nhiệt độ, độ ẩm và ánh sáng, ta chỉ update sau một khoảng
+  // thời gian nhất định được khai báo trong biến UPDATE_INTERVAL
+  unsigned long currentMillis = millis();
+  if (lastSensorUpdateTime == 0 || currentMillis - lastSensorUpdateTime >= UPDATE_INTERVAL) {
+    Serial.println(); Serial.println();    
+    Serial.println("-------------- Cap nhat du lieu cam bien ----------------");
+    humidity = dht.readHumidity();
+    dtostrf(humidity, 4, 1, humidityMsg);
+    Serial.print("Do am la: "); Serial.print(humidityMsg); Serial.println("%");
+  
+    temperature = dht.readTemperature();
+    dtostrf(temperature, 4, 1, temperatureMsg);
+    Serial.print("Nhiet do la: "); Serial.print(temperatureMsg); Serial.println("'C");
+    
+    brightness = analogRead(A0)*100/1024;
+    dtostrf(brightness, 4, 1, brightnessMsg);
+    Serial.print("Do sang la: "); Serial.print(brightnessMsg); Serial.println("%");
+
+    // Hiển thị dữ liệu ra màn hình LCD
+
+    if (!isnan(temperature) && !isnan(humidity)) {
+      tft.setTextSize(2);
+  
+      tft.setCursor(40, 87);
+      tft.setTextColor(ST7735_CYAN, ST7735_BLACK);
+  
+      tft.print(humidityMsg); tft.print("%");
+  
+      tft.setCursor(40, 108);
+      tft.setTextColor(ST7735_MAGENTA, ST7735_BLACK);
+  
+      tft.print(temperatureMsg); tft.print("'C");
     }
-  } else {
-    client.loop();  
+
+    lastSensorUpdateTime = currentMillis;
   }
 
+  // Đối với cảm biến chuyển động thì luôn đọc để phát hiện
+  // chuyển động tức thời
   boolean currentMotionStatus = digitalRead(PIR_PIN);
   
   if (currentMotionStatus != lastMotionStatus) {
     lastMotionStatus = currentMotionStatus;
     if (currentMotionStatus) {
-      Serial.println("Motion detected");
-      bitmap2(130, 90, icon_motion, 24, 24);
-      client.publish(motionTopic, "1");
+      Serial.println("Phat hien chuyen dong");
+      bitmap2(130, 100, icon_motion, 24, 24);
     } else {
-      tft.fillRect(130, 90, 24, 24, ST7735_BLACK);
-    }
-    
-  }
-
-  updateIdleScreen();
-  server.handleClient();
-  unsigned long currentMillis = millis();
-
-  if (lastSentToServer == 0 || currentMillis - lastSentToServer >= UPDATE_INTERVAL) {
-    // Update sensor information to MQTT server
-    client.publish(humidityTopic, humidityMsg);
-    delay(100);
-    client.publish(tempTopic, temperatureMsg);
-    delay(100);
-    client.publish(lightStatusTopic, lightStatusMsg);
-    Serial.print("Do sang (%) hien tai: "); Serial.println(lightStatus);
-
-    // save the last time sent data to server
-    lastSentToServer = currentMillis;
-  }
+      Serial.println("Khong con chuyen dong");
+      tft.fillRect(130, 100, 24, 24, ST7735_BLACK);
+    }    
+  }  
 }
 
+/*-------- Cập nhật thời gian dùng NTP ----------*/
 
-void updateIdleScreen() {
-  unsigned long startDrawTime = millis();
+void updateTime() {
+  if (timeStatus() != timeNotSet) {
+    if (now() != lastClockUpdateTime) { // Chỉ update nếu thời gian đã thay đổi
+      lastClockUpdateTime = now();
+      int currentHour = hour();
+      int currentMinute = minute();
+      int currentSec = second();
 
-  /*********************************
-   * Display current date and time
-   *********************************/
+      int currentDay = day();
+      int currentMonth = month();
+      int currentYear = year();
+      int weekDay = weekday();
+      
+      Serial.print("Gio hien tai la ");
+      Serial.print(currentHour); Serial.print(":");
+      Serial.print(currentMinute); Serial.print(":");
+      Serial.print(currentSec); Serial.print(" ");
 
-   if (timeStatus() != timeNotSet) {
-    if (now() != prevDisplay) { //update the display only if time has changed
-      prevDisplay = now();
+      Serial.print(currentDay); Serial.print("/");
+      Serial.print(currentMonth); Serial.print("/");
+      Serial.print(currentYear); Serial.print(" ");
 
+      switch (weekDay)
+      {
+        case 1: Serial.print(" SUN"); break;
+        case 2: Serial.print(" MON"); break;
+        case 3: Serial.print(" TUE"); break;
+        case 4: Serial.print(" WED"); break;
+        case 5: Serial.print(" THU"); break;
+        case 6: Serial.print(" FRI"); break;
+        case 7: Serial.print(" SAT"); break;
+      }
+
+      Serial.println(); Serial.println();
+
+      // Hiển thị ra màn hình LCD
       // current time
       tft.setTextSize(4);
       tft.setTextColor(ST7735_CYAN, ST7735_BLACK);
     
       tft.setCursor(20, 5);
-      printTwoDigitsByZero(hour(), &lastHour);
+      printTwoDigitsByZero(currentHour);
       tft.setCursor(68, 5);
       tft.print(":");
       tft.setCursor(92, 5);
-      printTwoDigitsByZero(minute(), &lastMinute);
+      printTwoDigitsByZero(currentMinute);
     
       int sx = 21;
       int sy = 40;
-      int sec = second()*2;
+      int sec = currentSec*2;
       int black = (60-sec)*2;
       tft.fillRect(sx, sy, sec, 3, ST7735_YELLOW);
       tft.fillRect(sx+sec, sy, black, 3, ST7735_BLACK);
@@ -427,18 +342,18 @@ void updateIdleScreen() {
       tft.setTextSize(2);
       tft.setTextColor(ST7735_WHITE, ST7735_BLACK);
       tft.setCursor(19, 50);
-      tft.print(day());
+      tft.print(currentDay);
       tft.print("/");
-      tft.print(month());
+      tft.print(currentMonth);
       tft.print("/");
-      tft.print(year());
+      tft.print(currentYear);
 
       // current week day
       tft.setTextColor(ST7735_WHITE, ST7735_BLACK);
       tft.setCursor(65, 70);
       tft.setTextSize(1);
     
-      switch (weekday())
+      switch (weekDay)
       {
         case 1: tft.print("      SUN"); break;
         case 2: tft.print("      MON"); break;
@@ -450,228 +365,7 @@ void updateIdleScreen() {
       }
     }
   }  
-
-  /*******************************************
-   * Display current temperature and humidity
-   ******************************************/
-   
-  humidity = dht.readHumidity();
-  dtostrf(humidity, 4, 1, humidityMsg);
-  Serial.println(humidityMsg);  
-
-  temperature = dht.readTemperature();
-  dtostrf(temperature, 4, 1, temperatureMsg);
-  Serial.println(temperatureMsg);  
-  
-  lightStatus = analogRead(A0)*100/1024;
-  dtostrf(lightStatus, 4, 1, lightStatusMsg);
-
-  if (!isnan(temperature) && !isnan(humidity))
-  {
-    tft.setTextSize(2);
-
-    tft.setCursor(40, 87);
-    tft.setTextColor(ST7735_CYAN, ST7735_BLACK);
-
-    tft.print(humidityMsg);
-    tft.print("%");
-
-    tft.setCursor(40, 108);
-    tft.setTextColor(ST7735_MAGENTA, ST7735_BLACK);
-
-    tft.print(temperatureMsg);
-    tft.print("'C");
-
-    if ((minHumidity != 0 && humidity < minHumidity) 
-      || (maxHumidity != 0 && humidity > maxHumidity)) {
-      raiseAlarm();
-    }
-
-    if ((minTemperature != 0 && temperature < minTemperature) 
-      || (maxTemperature != 0 && temperature > maxTemperature)) {
-      raiseAlarm();
-    }
-  }
-
-  updateSecDot(millis() - (startDrawTime), 4, 68, 5, ST7735_CYAN);
 }
-
-void bitmap(int x, int y, int16_t *bitmap, int16_t w, int16_t h) {
-
-  int16_t col, row;
-  int16_t offset = 0;
-  tft.setAddrWindow(x, y, x+w-1, y+h-1);
-
-  for (row = 0; row < h; row++) 
-  {
-    for (col = 0; col < w; col++) {
-        tft.pushColor(pgm_read_word(bitmap+offset));
-        offset++;
-      }
-    }
-}
-
-void bitmap2(int x, int y, int16_t *bitmap, int16_t w, int16_t h) {
-
-  int16_t col, row;
-  int16_t offset = 0;
-  tft.setAddrWindow(x, y, x+w-1, y+h-1);
-  for (row=0; row<h; row++) { // For each scanline...
-    for (col=0; col<w; col++) { // For each pixel...
-      //To read from Flash Memory, pgm_read_XXX is required.
-      //Since image is stored as uint16_t, pgm_read_word is used as it uses 16bit address
-      tft.drawPixel(x+col, y+row, pgm_read_word(bitmap + offset));
-      offset++;
-    } // end pixel
-  }
-}
-
-void raiseAlarm() {
-  bitmap2(130, 90, icon_alarm, 24, 24);
-  
-  for(int i=0; i<10; i++) {
-    digitalWrite(BUZZER_PIN, HIGH); delay(500);
-    digitalWrite(BUZZER_PIN, LOW); delay(500);
-  }
-  tft.fillRect(130, 90, 24, 24, ST7735_BLACK);
-}
-
-int stringToInt(String string) {
-  int value = 0;
-  for (int i=0; i < string.length() ; i++)
-  {
-    char c = string[i];
-    if (c >= '0' && c <= '9')
-    { 
-      value = (10 * value) + (c - '0');
-    }
-  }
-  return value;
-}
-
-uint32_t stringToTime(String string) {
-  uint32_t pctime = 0;
-  for (int i=0; i < string.length() ; i++) {
-    char c = string[i];
-    if (c >= '0' && c <= '9') { 
-      pctime = (10 * pctime) + (c - '0');
-    }
-  }
-  return pctime;
-}
-
-bool printTwoDigitsByZero(int digits, uint8_t *last) {
-  if (*last == digits)
-  {
-    return false;
-  }
-
-  if (digits < 10)
-  {
-    tft.print("0");
-  }
-
-  tft.print(digits);
-
-  *last = digits;
-
-  return true;
-}
-
-bool printTwoDigitsBySpace(int digits, uint8_t *last) {
-  if (*last == digits)
-  {
-    return false;
-  }
-
-  if (digits < 10)
-  {
-    tft.print(" ");
-  }
-
-  tft.print(digits);
-
-  *last = digits;
-
-  return true;
-}
-
-bool printFourDigitsByZero(int digits, uint16_t *last) {
-  if (*last == digits)
-  {
-    return false;
-  }
-
-  if (digits < 10) 
-  {
-    tft.print("   ");
-  } else
-  if (digits < 100) 
-  {
-    tft.print("  ");
-  } else
-  if (digits < 1000) 
-  {
-    tft.print(" ");
-  }
-
-  tft.print(digits);
-
-  *last = digits;
-
-  return true;
-}
-
-void clearScreen() {
-  tft.fillScreen(ST7735_BLACK);
-  tft.setTextColor(ST7735_WHITE, ST7735_BLACK);
-
-  lastHour = 255;
-  lastMinute = 255;
-  lastHumidity = 255;
-  lastTemperature = 255;
-}
-
-void drawIdleScreen() {
-  clearScreen();
-
-  bitmap(19, 87, icon_humidity, 16, 16);
-  bitmap(18, 107, icon_temperature, 16, 16);
-}
-
-void updateSecDot(unsigned long drawTime, int fontsize, int x, int y, uint16_t color) {
-  if (drawTime < 1000) {
-    unsigned long diffTime = 1000 - drawTime;
-    delay(diffTime);
-  }
-
-  tft.setTextSize(fontsize);
-  tft.setCursor(x, y);
-  tft.setTextColor(color, ST7735_BLACK);
-
-  if (blinkDot) {
-     tft.print(':');
-  } else {
-    tft.print(' ');
-  }
-
-  tft.setTextSize(1);
-  tft.setCursor(0, 120);  
-
-  blinkDot = !blinkDot;
-}
-
-void onMQTTMessageReceived(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Nhan duoc du lieu tu MQTT server [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-}
-
-/*-------- NTP code ----------*/
 
 const int NTP_PACKET_SIZE = 48; // NTP time is in the first 48 bytes of message
 byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
@@ -728,82 +422,46 @@ void sendNTPpacket(IPAddress &address) {
   Udp.endPacket();
 }
 
-/*---------------------- Web server setup ----------------------*/
-
-void launchWeb(int webtype) {
-  if (mdns.begin("ivysensor1", WiFi.localIP())) {
-    Serial.println("MDNS responder started");
-  }
-
-  server.on("/", handleRoot);
-  server.onNotFound(handleNotFound);
-
-  server.begin();
-  Serial.println("Server started"); 
-  Serial.print("Connect to http://ivysensor1.local or http://");
-  Serial.println(WiFi.localIP());
+/*-------- Hiển thị thông tin ra màn hình LCD ----------*/
+void clearScreen() {
+  tft.fillScreen(ST7735_BLACK);
+  tft.setTextColor(ST7735_WHITE, ST7735_BLACK);
 }
 
-void handleRoot()
-{
-  if (server.hasArg("tempMin")) {
-    handleSubmit();
-  }
-  else {
-    server.send(200, "text/html", INDEX_HTML);
+void bitmap(int x, int y, int16_t *bitmap, int16_t w, int16_t h) {
+  int16_t col, row;
+  int16_t offset = 0;
+  tft.setAddrWindow(x, y, x+w-1, y+h-1);
+
+  for (row = 0; row < h; row++) {
+    for (col = 0; col < w; col++) {
+      tft.pushColor(pgm_read_word(bitmap+offset));
+      offset++;
+    }
   }
 }
 
-void returnFail(String msg)
-{
-  server.sendHeader("Connection", "close");
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.send(500, "text/plain", msg + "\r\n");
-}
-
-void handleSubmit()
-{
-  String temp;
-
-  if (!server.hasArg("tempMin")) return returnFail("BAD ARGS");
-  
-  minTemperature = server.arg("tempMin").toFloat();
-  Serial.print("Temp Min: "); Serial.println(minTemperature);
-  
-  maxTemperature = server.arg("tempMax").toFloat();
-  Serial.print("Temp Max: "); Serial.println(maxTemperature);
-  
-  minHumidity = server.arg("humidMin").toFloat();
-  Serial.print("Humidity Min: "); Serial.println(minHumidity);
-  
-  maxHumidity = server.arg("humidMax").toFloat();
-  Serial.print("Humidity Max: "); Serial.println(maxHumidity);
-  Serial.print("Time: "); Serial.println(server.arg("time"));
-  Serial.print("Repeat: "); Serial.println(server.arg("repeat"));
-  server.send(200, "text/html", INDEX_HTML);
-  return;
-}
-
-void returnOK()
-{
-  server.sendHeader("Connection", "close");
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.send(200, "text/plain", "OK\r\n");
-}
-
-void handleNotFound()
-{
-  String message = "File Not Found\n\n";
-  message += "URI: ";
-  message += server.uri();
-  message += "\nMethod: ";
-  message += (server.method() == HTTP_GET)?"GET":"POST";
-  message += "\nArguments: ";
-  message += server.args();
-  message += "\n";
-  for (uint8_t i=0; i<server.args(); i++){
-    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+void bitmap2(int x, int y, int16_t *bitmap, int16_t w, int16_t h) {
+  int16_t col, row;
+  int16_t offset = 0;
+  tft.setAddrWindow(x, y, x+w-1, y+h-1);
+  for (row=0; row<h; row++) { // For each scanline...
+    for (col=0; col<w; col++) { // For each pixel...
+      //To read from Flash Memory, pgm_read_XXX is required.
+      //Since image is stored as uint16_t, pgm_read_word is used as it uses 16bit address
+      tft.drawPixel(x+col, y+row, pgm_read_word(bitmap + offset));
+      offset++;
+    } // end pixel
   }
-  server.send(404, "text/plain", message);
+}
+
+bool printTwoDigitsByZero(int digits) {
+  if (digits < 10) {
+    tft.print("0");
+  }
+
+  tft.print(digits);
+
+  return true;
 }
 
