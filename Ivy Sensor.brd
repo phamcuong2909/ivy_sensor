@@ -606,10 +606,6 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <wire x1="8.725" y1="1.05" x2="52.545" y2="1.05" width="0.127" layer="21"/>
 <wire x1="52.545" y1="1.05" x2="52.545" y2="33.43" width="0.127" layer="21"/>
 <wire x1="52.545" y1="33.43" x2="8.725" y2="33.43" width="0.127" layer="21"/>
-<pad name="P$3" x="55.5" y="21.05" drill="1" diameter="1.778" rot="R270"/>
-<pad name="P$4" x="55.5" y="18.52" drill="1" diameter="1.778" rot="R270"/>
-<pad name="P$5" x="55.5" y="15.98" drill="1" diameter="1.778" rot="R270"/>
-<pad name="P$6" x="55.5" y="13.44" drill="1" diameter="1.778" rot="R270"/>
 <pad name="P$9" x="2.5" y="26.14" drill="1" diameter="1.778" rot="R270"/>
 <pad name="P$10" x="2.5" y="23.6" drill="1" diameter="1.778" rot="R270"/>
 <pad name="P$11" x="2.5" y="21.06" drill="1" diameter="1.778" rot="R270"/>

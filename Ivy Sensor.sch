@@ -2759,10 +2759,6 @@ Through-hole photocell (http://www.sparkfun.com/products/9088)&lt;br&gt;
 <wire x1="8.725" y1="1.05" x2="52.545" y2="1.05" width="0.127" layer="21"/>
 <wire x1="52.545" y1="1.05" x2="52.545" y2="33.43" width="0.127" layer="21"/>
 <wire x1="52.545" y1="33.43" x2="8.725" y2="33.43" width="0.127" layer="21"/>
-<pad name="P$3" x="55.5" y="21.05" drill="1" diameter="1.778" rot="R270"/>
-<pad name="P$4" x="55.5" y="18.52" drill="1" diameter="1.778" rot="R270"/>
-<pad name="P$5" x="55.5" y="15.98" drill="1" diameter="1.778" rot="R270"/>
-<pad name="P$6" x="55.5" y="13.44" drill="1" diameter="1.778" rot="R270"/>
 <pad name="P$9" x="2.5" y="26.14" drill="1" diameter="1.778" rot="R270"/>
 <pad name="P$10" x="2.5" y="23.6" drill="1" diameter="1.778" rot="R270"/>
 <pad name="P$11" x="2.5" y="21.06" drill="1" diameter="1.778" rot="R270"/>
@@ -2787,15 +2783,11 @@ Through-hole photocell (http://www.sparkfun.com/products/9088)&lt;br&gt;
 <wire x1="-12.7" y1="-10.16" x2="-12.7" y2="17.78" width="0.254" layer="94"/>
 <pin name="GND" x="5.08" y="-12.7" length="middle" rot="R90"/>
 <pin name="SCK" x="-7.62" y="-12.7" length="middle" rot="R90"/>
-<pin name="SD_MOSI" x="0" y="20.32" length="middle" rot="R270"/>
 <pin name="RST" x="0" y="-12.7" length="middle" rot="R90"/>
-<pin name="SD_SCK" x="-5.08" y="20.32" length="middle" rot="R270"/>
 <pin name="SDA" x="-5.08" y="-12.7" length="middle" rot="R90"/>
-<pin name="SD_MISO" x="-2.54" y="20.32" length="middle" rot="R270"/>
 <pin name="A0" x="-2.54" y="-12.7" length="middle" rot="R90"/>
 <pin name="3.3V" x="7.62" y="-12.7" length="middle" rot="R90"/>
 <pin name="LED" x="-10.16" y="-12.7" length="middle" rot="R90"/>
-<pin name="SD_CS" x="2.54" y="20.32" length="middle" rot="R270"/>
 <pin name="CS" x="2.54" y="-12.7" length="middle" rot="R90"/>
 <text x="-15.24" y="-7.62" size="1.27" layer="95" rot="R90">&gt;NAME</text>
 <text x="-15.24" y="2.54" size="1.27" layer="96" rot="R90">&gt;VALUE</text>
@@ -2817,10 +2809,6 @@ Through-hole photocell (http://www.sparkfun.com/products/9088)&lt;br&gt;
 <connect gate="G$1" pin="RST" pad="P$13"/>
 <connect gate="G$1" pin="SCK" pad="P$10"/>
 <connect gate="G$1" pin="SDA" pad="P$11"/>
-<connect gate="G$1" pin="SD_CS" pad="P$6"/>
-<connect gate="G$1" pin="SD_MISO" pad="P$4"/>
-<connect gate="G$1" pin="SD_MOSI" pad="P$5"/>
-<connect gate="G$1" pin="SD_SCK" pad="P$3"/>
 </connects>
 <technologies>
 <technology name=""/>
